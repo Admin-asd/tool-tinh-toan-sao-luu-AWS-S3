@@ -1,0 +1,433 @@
+<!doctype html>
+<!-- Vị trí file: wp-content/gb-tools/calculators/cong-cu-tinh-toan-sao-luu-aws-s3.html -->
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Công cụ tính toán sao lưu AWS S3 online - AWS S3 Backup Calculator</title>
+<meta name="description" content="Ước tính chi phí vòng đời sao lưu AWS S3 Standard và Glacier, so sánh tần suất quay vòng và tạo cấu hình AWS CLI Lifecycle JSON trực tiếp trên trình duyệt.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.1.11"></script>
+<style type="text/tailwindcss">
+  @theme {
+    --font-sans: Roboto, ui-sans-serif, system-ui, sans-serif;
+    --color-primary: #fdca1e; --color-primary-hover: #e8b008; --color-primary-soft: #fffbeb;
+    --color-primary-ink: #9c6406; --color-ink: #0f172a; --color-neutral: #e2e8f0;
+  }
+</style>
+</head>
+<body class="bg-white font-sans text-ink antialiased">
+<main class="mx-auto max-w-5xl p-4 sm:p-6 space-y-6">
+
+  <div class="bg-white border border-neutral rounded-2xl shadow-xs overflow-hidden divide-y divide-neutral">
+    
+    <!-- Thanh tiêu đề & Nút hành động trên cùng -->
+    <div class="p-4 sm:px-6 bg-slate-50/50 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex flex-wrap items-center gap-3">
+        <span class="font-bold text-sm text-ink">Công cụ tính toán sao lưu AWS S3</span>
+        <button type="button" onclick="copySummary()" class="min-h-9 rounded-xl bg-primary px-4 font-bold text-xs text-ink hover:bg-primary-hover shadow-xs cursor-pointer transition-colors">
+          Tóm tắt bản sao
+        </button>
+        <button type="button" onclick="resetDefaults()" class="min-h-9 rounded-xl border border-neutral bg-white px-4 font-semibold text-xs text-ink hover:border-primary cursor-pointer transition-colors">
+          Khôi phục cài đặt mặc định
+        </button>
+      </div>
+      <span class="px-3 py-1 rounded-lg border border-amber-300 bg-primary-soft text-[11px] font-bold text-primary-ink">
+        Đã tính toán
+      </span>
+    </div>
+
+    <!-- Khu vực giới thiệu chiến lược & công thức -->
+    <div class="p-5 sm:p-6 space-y-4">
+      <div class="font-bold text-sm text-primary-ink">Chiến lược sao lưu tiết kiệm chi phí</div>
+      <p class="text-xs text-slate-600 leading-relaxed">
+        Công cụ tính toán này chỉ ước tính vòng đời lưu trữ. Glacier biểu thị Lớp Lưu trữ Vòng đời mà bạn chọn bên dưới.
+      </p>
+
+      <!-- 2 Dòng so sánh luồng vòng đời -->
+      <div class="border border-neutral rounded-xl divide-y divide-neutral bg-slate-50/40 text-xs">
+        <div class="p-3.5 flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-4">
+            <span class="font-bold text-ink w-28 shrink-0">Chỉ tiêu chuẩn</span>
+            <span class="text-slate-600 font-medium">Tải lên &rarr; Tiêu chuẩn S3 &rarr; Hết hạn</span>
+          </div>
+          <span class="text-slate-500">Thông thường chi phí lưu trữ cao hơn</span>
+        </div>
+        <div class="p-3.5 flex flex-wrap items-center justify-between gap-2 bg-primary-soft/30">
+          <div class="flex items-center gap-4">
+            <span class="font-bold text-ink w-28 shrink-0">Vòng đời</span>
+            <span class="text-slate-700 font-medium">Tải lên &rarr; Tiêu chuẩn S3 &rarr; <strong id="flowClassBadge" class="text-primary-ink">Glacier IR</strong> &rarr; Hết hạn</span>
+          </div>
+          <span class="font-bold text-primary-ink">Chi phí lưu trữ tiềm năng thấp hơn*</span>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-600 leading-relaxed">
+        Kích thước, tần suất và thời gian lưu trữ bản sao lưu giống nhau. Việc chuyển các bản sao lưu cũ sang Glacier có thể giảm chi phí lưu trữ, trong khi chi phí khôi phục và hành vi phục hồi phụ thuộc vào loại bản sao lưu được chọn.
+      </p>
+      <p class="text-[11px] text-slate-400">
+        *Mức tiết kiệm phụ thuộc vào thời gian lưu trữ và mức độ sử dụng. Phí truy xuất, chuyển dữ liệu, yêu cầu và xóa sớm không được tính vào công cụ tính toán này.
+      </p>
+
+      <div class="bg-slate-50 border border-neutral rounded-xl px-4 py-3 font-mono text-xs text-ink overflow-x-auto">
+        Monthly cost = (D / F) * (Standard days * Standard rate + Days in Glacier * Glacier rate)
+      </div>
+    </div>
+
+    <!-- Khu vực 2 cột: Đầu vào sao lưu & Giá có thể chỉnh sửa -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-neutral">
+      
+      <!-- Cột trái: Đầu vào sao lưu -->
+      <div class="p-5 sm:p-6 space-y-5">
+        <div class="flex items-center justify-between">
+          <span class="font-bold text-sm text-ink">Đầu vào sao lưu</span>
+          <button type="button" onclick="resetDefaults()" class="text-xs font-bold text-primary-ink hover:underline cursor-pointer">
+            Khôi phục cài đặt mặc định
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="space-y-1.5">
+            <label for="backupSize" class="block text-xs font-bold text-slate-700">Dung lượng sao lưu (GB)</label>
+            <input type="number" id="backupSize" value="100" min="0" step="any" oninput="recalculateAll()" class="w-full rounded-xl border border-neutral p-3 text-sm font-mono font-bold text-ink outline-none focus:border-primary bg-white">
+          </div>
+
+          <div class="space-y-1.5">
+            <label for="storageClass" class="block text-xs font-bold text-slate-700">Lớp lưu trữ vòng đời</label>
+            <select id="storageClass" onchange="recalculateAll()" class="w-full rounded-xl border border-neutral p-3 text-xs font-bold text-ink outline-none focus:border-primary bg-white cursor-pointer h-[46px]">
+              <option value="GLACIER_IR">S3 Glacier Instant Retrieval</option>
+              <option value="GLACIER">S3 Glacier Flexible Retrieval</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div class="space-y-1.5">
+            <label for="backupFreq" class="block text-xs font-bold text-slate-700">Tần suất sao lưu</label>
+            <input type="number" id="backupFreq" value="1" min="1" step="1" oninput="recalculateAll()" class="w-full rounded-xl border border-neutral p-3 text-sm font-mono font-bold text-ink outline-none focus:border-primary bg-white">
+          </div>
+
+          <div class="space-y-1.5">
+            <label for="standardDays" class="block text-xs font-bold text-slate-700">Số ngày trong S3</label>
+            <input type="number" id="standardDays" value="1" min="0" step="1" oninput="recalculateAll()" class="w-full rounded-xl border border-neutral p-3 text-sm font-mono font-bold text-ink outline-none focus:border-primary bg-white">
+          </div>
+
+          <div class="space-y-1.5">
+            <label for="glacierDays" class="block text-xs font-bold text-slate-700">Những ngày ở Glacier</label>
+            <input type="number" id="glacierDays" value="90" min="0" step="1" oninput="recalculateAll()" class="w-full rounded-xl border border-neutral p-3 text-sm font-mono font-bold text-ink outline-none focus:border-primary bg-white">
+          </div>
+        </div>
+
+        <p class="text-[11px] text-slate-500 leading-relaxed">
+          Thời gian lưu trữ trong Glacier bắt đầu tính từ khi mỗi bản sao lưu được chuyển ra khỏi S3 Standard, với mức tối thiểu là 90 ngày để phản ánh thời gian lưu trữ tối thiểu của Glacier (ước tính này không bao gồm phí xóa sớm). Tổng thời gian khi hết hạn được hiển thị bên dưới dưới dạng Max Backup Age: mặc định là 1 ngày trong Standard cộng với 90 ngày trong Glacier, tổng cộng là 91 ngày, bất kể tần suất sao lưu là bao nhiêu.
+        </p>
+      </div>
+
+      <!-- Cột phải: Giá có thể chỉnh sửa (USD/GB/tháng) -->
+      <div class="p-5 sm:p-6 space-y-5 bg-slate-50/20">
+        <div class="flex items-center justify-between">
+          <span class="font-bold text-sm text-ink">Giá có thể chỉnh sửa (USD/GB/tháng)</span>
+          <span class="text-xs font-bold text-primary-ink">Bảng giá tham khảo AWS S3</span>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div class="space-y-1.5">
+            <label for="rateStandard" class="block text-xs font-bold text-slate-700">Chuẩn S3 (50 TB đầu)</label>
+            <input type="number" id="rateStandard" value="0.025" min="0" step="0.0001" oninput="recalculateAll()" class="w-full rounded-xl border border-neutral p-3 text-sm font-mono font-bold text-ink outline-none focus:border-primary bg-white">
+          </div>
+
+          <div class="space-y-1.5">
+            <label for="rateGlacierIR" class="block text-xs font-bold text-slate-700">Glacier Instant Retrieval</label>
+            <input type="number" id="rateGlacierIR" value="0.005" min="0" step="0.0001" oninput="recalculateAll()" class="w-full rounded-xl border border-neutral p-3 text-sm font-mono font-bold text-ink outline-none focus:border-primary bg-white">
+          </div>
+
+          <div class="space-y-1.5">
+            <label for="rateGlacierFlex" class="block text-xs font-bold text-slate-700">Glacier Flexible Retrieval</label>
+            <input type="number" id="rateGlacierFlex" value="0.0045" min="0" step="0.0001" oninput="recalculateAll()" class="w-full rounded-xl border border-neutral p-3 text-sm font-mono font-bold text-ink outline-none focus:border-primary bg-white">
+          </div>
+        </div>
+
+        <p class="text-[11px] text-slate-500 leading-relaxed">
+          Mặc định: Giá lưu trữ tại Singapore (ap-southeast-1) tính bằng USD/GB/tháng. S3 Standard sử dụng gói 50 TB/tháng đầu tiên. Chỉ bao gồm dung lượng lưu trữ; bạn có thể chỉnh sửa bất kỳ mức giá nào để sử dụng mức giá của riêng mình. Nguồn: API Bảng giá AWS.
+        </p>
+      </div>
+
+    </div>
+
+    <!-- Khu vực 3: Chi phí ước tính hàng tháng (10 thẻ thông số) -->
+    <div class="p-5 sm:p-6 space-y-4">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <span class="font-bold text-sm text-ink">Chi phí ước tính hàng tháng</span>
+        <span id="selectedClassLabel" class="text-xs font-bold text-primary-ink">S3 Glacier Instant Retrieval</span>
+      </div>
+
+      <!-- Hàng 1: 4 thẻ lớn -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div class="rounded-xl border border-amber-300 bg-primary-soft p-4 space-y-1">
+          <div class="text-[11px] font-bold uppercase tracking-wider text-primary-ink">CHI PHÍ ƯỚC TÍNH HÀNG THÁNG</div>
+          <div class="text-xl font-mono font-bold text-ink" id="cardMonthlyCost">47,50 đô la</div>
+        </div>
+
+        <div class="rounded-xl border border-neutral bg-slate-50/60 p-4 space-y-1">
+          <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">LOẠI LƯU TRỮ / TỐC ĐỘ TRUY XUẤT</div>
+          <div class="text-sm font-bold text-ink pt-1" id="cardStorageSpeed">Glacier IR / Giây</div>
+        </div>
+
+        <div class="rounded-xl border border-neutral bg-slate-50/60 p-4 space-y-1">
+          <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">TẦN SUẤT SAO LƯU</div>
+          <div class="text-sm font-bold text-ink pt-1" id="cardFreqLabel">Mỗi ngày</div>
+        </div>
+
+        <div class="rounded-xl border border-neutral bg-slate-50/60 p-4 space-y-1">
+          <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">NHỮNG NGÀY Ở GLACIER</div>
+          <div class="text-sm font-bold text-ink pt-1" id="cardGlacierDays">90 ngày</div>
+        </div>
+      </div>
+
+      <!-- Hàng 2: 6 thẻ phụ -->
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <div class="rounded-xl border border-neutral bg-white p-3.5 space-y-1">
+          <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">BẢN SAO TIÊU CHUẨN</div>
+          <div class="text-xs font-mono font-bold text-ink" id="cardStdVolume">100 GB/tháng</div>
+        </div>
+
+        <div class="rounded-xl border border-neutral bg-white p-3.5 space-y-1">
+          <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">BẢN SAO LƯU TRỮ</div>
+          <div class="text-xs font-mono font-bold text-ink" id="cardGlacierVolume">9.000 GB/tháng</div>
+        </div>
+
+        <div class="rounded-xl border border-neutral bg-white p-3.5 space-y-1">
+          <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">CHI PHÍ TIÊU CHUẨN</div>
+          <div class="text-xs font-mono font-bold text-ink" id="cardStdCost">2,50 đô la</div>
+        </div>
+
+        <div class="rounded-xl border border-neutral bg-white p-3.5 space-y-1">
+          <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">CHI PHÍ LƯU TRỮ</div>
+          <div class="text-xs font-mono font-bold text-ink" id="cardGlacierCost">45,00 đô la</div>
+        </div>
+
+        <div class="rounded-xl border border-neutral bg-white p-3.5 space-y-1">
+          <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">KÍCH THƯỚC SAO LƯU</div>
+          <div class="text-xs font-mono font-bold text-ink" id="cardBackupSize">100 GB</div>
+        </div>
+
+        <div class="rounded-xl border border-neutral bg-white p-3.5 space-y-1">
+          <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">TUỔI SAO LƯU TỐI ĐA</div>
+          <div class="text-xs font-mono font-bold text-ink" id="cardMaxAge">91 ngày</div>
+        </div>
+      </div>
+
+      <p class="text-[11px] text-slate-400">
+        Bảng giá ước tính không bao gồm phí truy xuất, truyền dữ liệu, yêu cầu, siêu dữ liệu, kích thước đối tượng tối thiểu, xóa sớm, thuế và phí hỗ trợ.
+      </p>
+    </div>
+
+    <!-- Khu vực 4: Bảng So sánh chi phí quay vòng -->
+    <div class="p-5 sm:p-6 space-y-4">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <span class="font-bold text-sm text-ink">So sánh chi phí quay vòng</span>
+        <span class="text-xs text-slate-500">Lớp lưu trữ được chọn so sánh với lịch luân phiên 1 ngày của lớp đó.</span>
+      </div>
+      <p class="text-xs text-slate-600">
+        Thay đổi tần suất sao lưu, không chỉ áp dụng cho phiên bản Standard so với Glacier.
+      </p>
+
+      <div class="border border-neutral rounded-xl overflow-x-auto">
+        <table class="w-full text-left border-collapse text-xs">
+          <thead>
+            <tr class="border-b border-neutral bg-slate-50 text-[11px] font-bold uppercase text-slate-500">
+              <th class="py-3 px-4">TÍNH THƯỜNG XUYÊN</th>
+              <th class="py-3 px-4">LỚP LƯU TRỮ SAU KHI CHUYỂN ĐỔI</th>
+              <th class="py-3 px-4">CHI PHÍ HÀNG THÁNG</th>
+              <th class="py-3 px-4">SỰ KHÁC BIỆT SO VỚI LỚP CÙNG NGÀY (1-DAY SAME CLASS)</th>
+            </tr>
+          </thead>
+          <tbody id="rotationTableBody" class="divide-y divide-neutral">
+            <!-- Render tự động qua JS -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Khu vực 5: Chính sách vòng đời (JSON AWS CLI) -->
+    <div class="p-5 sm:p-6 space-y-4 bg-slate-50/30">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <span class="font-bold text-sm text-ink">Chính sách vòng đời</span>
+        <div class="flex items-center gap-3">
+          <span class="text-xs text-slate-500">Mẫu dành cho lớp đã chọn</span>
+          <button type="button" onclick="copyLifecycleCode()" class="min-h-8 rounded-lg border border-neutral bg-white px-3 font-bold text-xs text-ink hover:border-primary cursor-pointer transition-colors">
+            Sao chép lệnh CLI
+          </button>
+        </div>
+      </div>
+
+      <p class="text-[11px] text-slate-500 leading-relaxed">
+        Đây chỉ là ví dụ. Hãy xem xét kỹ so sánh với các đối tượng sao lưu và chuỗi phục hồi thực tế của bạn trước khi áp dụng. Ngày chuyển đổi và ngày hết hạn khớp với ước tính và số lượng từ khi mỗi đối tượng được tạo; AWS làm tròn thời gian đủ điều kiện đến nửa đêm UTC tiếp theo và xóa các đối tượng đã hết hạn không đồng bộ, do đó việc xóa có thể xảy ra muộn hơn thời gian được liệt kê.
+      </p>
+
+      <pre id="lifecycleCodeBlock" class="w-full rounded-xl border border-neutral bg-white p-4 text-xs font-mono text-ink overflow-x-auto leading-relaxed"></pre>
+    </div>
+
+  </div>
+
+</main>
+
+<script>
+  async function gbCopy(text) {
+    try { await navigator.clipboard.writeText(text); return true; } catch (e) {}
+    const t = document.createElement('textarea'); t.value = text; t.style.position = 'fixed'; t.style.opacity = '0';
+    document.body.appendChild(t); t.select(); const ok = document.execCommand('copy'); t.remove(); return ok;
+  }
+
+  function formatDollar(num, maxDecimals = 2) {
+    if (isNaN(num)) return '0,00 đô la';
+    const isExactTwo = Math.abs(Math.round(num * 100) - num * 100) < 1e-6;
+    const decimals = isExactTwo ? 2 : maxDecimals;
+    return num.toLocaleString('vi-VN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: decimals
+    }) + ' đô la';
+  }
+
+  function formatNumberVN(num) {
+    return num.toLocaleString('vi-VN', { maximumFractionDigits: 2 });
+  }
+
+  function getFrequencyText(freq) {
+    if (freq === 1) return 'Mỗi ngày';
+    return `Cứ ${freq} ngày một lần`;
+  }
+
+  function recalculateAll() {
+    const D = Math.max(0, parseFloat(document.getElementById('backupSize').value) || 0);
+    const F = Math.max(1, parseInt(document.getElementById('backupFreq').value, 10) || 1);
+    const stdDays = Math.max(0, parseInt(document.getElementById('standardDays').value, 10) || 0);
+    const glacierDays = Math.max(0, parseInt(document.getElementById('glacierDays').value, 10) || 0);
+
+    const stdRate = Math.max(0, parseFloat(document.getElementById('rateStandard').value) || 0);
+    const glacierIRRate = Math.max(0, parseFloat(document.getElementById('rateGlacierIR').value) || 0);
+    const glacierFlexRate = Math.max(0, parseFloat(document.getElementById('rateGlacierFlex').value) || 0);
+
+    const storageClass = document.getElementById('storageClass').value;
+    const isIR = storageClass === 'GLACIER_IR';
+
+    const activeGlacierRate = isIR ? glacierIRRate : glacierFlexRate;
+    const shortClassName = isIR ? 'Glacier IR' : 'Glacier Flexible';
+    const fullClassName = isIR ? 'S3 Glacier Instant Retrieval' : 'S3 Glacier Flexible Retrieval';
+    const speedInfo = isIR ? 'Glacier IR / Giây' : 'Glacier Flexible / Phút - Giờ';
+
+    // Cập nhật nhãn động
+    document.getElementById('flowClassBadge').textContent = shortClassName;
+    document.getElementById('selectedClassLabel').textContent = fullClassName;
+
+    // Công thức: Monthly cost = (D / F) * (Standard days * Standard rate + Days in Glacier * Glacier rate)
+    const stdVolumeMonth = (D / F) * stdDays;
+    const glacierVolumeMonth = (D / F) * glacierDays;
+    const stdCost = stdVolumeMonth * stdRate;
+    const glacierCost = glacierVolumeMonth * activeGlacierRate;
+    const totalMonthlyCost = stdCost + glacierCost;
+    const maxAge = stdDays + glacierDays;
+
+    // Cập nhật 10 thẻ thông số
+    document.getElementById('cardMonthlyCost').textContent = formatDollar(totalMonthlyCost, 4);
+    document.getElementById('cardStorageSpeed').textContent = speedInfo;
+    document.getElementById('cardFreqLabel').textContent = getFrequencyText(F);
+    document.getElementById('cardGlacierDays').textContent = `${glacierDays} ngày`;
+
+    document.getElementById('cardStdVolume').textContent = `${formatNumberVN(stdVolumeMonth)} GB/tháng`;
+    document.getElementById('cardGlacierVolume').textContent = `${formatNumberVN(glacierVolumeMonth)} GB/tháng`;
+    document.getElementById('cardStdCost').textContent = formatDollar(stdCost, 4);
+    document.getElementById('cardGlacierCost').textContent = formatDollar(glacierCost, 4);
+    document.getElementById('cardBackupSize').textContent = `${formatNumberVN(D)} GB`;
+    document.getElementById('cardMaxAge').textContent = `${maxAge} ngày`;
+
+    // Tính toán bảng So sánh chi phí quay vòng (1, 2, 7, 10, 15, 30 ngày)
+    const baselineDailyCost = D * (stdDays * stdRate + glacierDays * activeGlacierRate);
+    const intervals = [1, 2, 7, 10, 15, 30];
+    const tbody = document.getElementById('rotationTableBody');
+    tbody.innerHTML = '';
+
+    intervals.forEach(interval => {
+      const costAtInterval = baselineDailyCost / interval;
+      const diffDollar = baselineDailyCost - costAtInterval;
+      const diffPercent = baselineDailyCost > 0 ? (diffDollar / baselineDailyCost) * 100 : 0;
+
+      const isCurrentFreq = interval === F;
+      const diffText = interval === 1
+        ? 'Mức cơ bản (0,0%)'
+        : `Giảm $${diffDollar.toLocaleString('vi-VN', { minimumFractionDigits: 2, maximumFractionDigits: 4 })} (${diffPercent.toFixed(1).replace('.', ',')}%)`;
+
+      const tr = document.createElement('tr');
+      tr.className = isCurrentFreq ? 'bg-primary-soft/50 font-semibold' : 'hover:bg-slate-50/70';
+      tr.innerHTML = `
+        <td class="py-3 px-4 text-ink">${getFrequencyText(interval)}</td>
+        <td class="py-3 px-4 text-slate-600">${shortClassName}</td>
+        <td class="py-3 px-4 font-mono font-bold text-ink">${formatDollar(costAtInterval, 4)}</td>
+        <td class="py-3 px-4 text-slate-600">${diffText}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    // Cập nhật đoạn lệnh cấu hình Lifecycle JSON
+    const ruleIdSuffix = isIR ? 'GlacierIR' : 'GlacierFlexible';
+    const ruleId = `Standard${stdDays}dTo${ruleIdSuffix}${maxAge}dMaxAge`;
+    const cliCommand = `aws s3api put-bucket-lifecycle-configuration \\
+  --bucket your-backup-bucket \\
+  --lifecycle-configuration '{
+  "Rules": [
+    {
+      "ID": "${ruleId}",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": ""
+      },
+      "Transitions": [
+        {
+          "Days": ${stdDays},
+          "StorageClass": "${storageClass}"
+        }
+      ],
+      "Expiration": {
+        "Days": ${maxAge}
+      }
+    }
+  ]
+}'`;
+    document.getElementById('lifecycleCodeBlock').textContent = cliCommand;
+  }
+
+  function resetDefaults() {
+    document.getElementById('backupSize').value = 100;
+    document.getElementById('storageClass').value = 'GLACIER_IR';
+    document.getElementById('backupFreq').value = 1;
+    document.getElementById('standardDays').value = 1;
+    document.getElementById('glacierDays').value = 90;
+    document.getElementById('rateStandard').value = 0.025;
+    document.getElementById('rateGlacierIR').value = 0.005;
+    document.getElementById('rateGlacierFlex').value = 0.0045;
+    recalculateAll();
+  }
+
+  async function copySummary() {
+    const size = document.getElementById('cardBackupSize').textContent;
+    const freq = document.getElementById('cardFreqLabel').textContent;
+    const cls = document.getElementById('selectedClassLabel').textContent;
+    const maxAge = document.getElementById('cardMaxAge').textContent;
+    const total = document.getElementById('cardMonthlyCost').textContent;
+    const text = `Tóm tắt sao lưu AWS S3:\n- Kích thước: ${size}\n- Tần suất: ${freq}\n- Lớp vòng đời: ${cls}\n- Tuổi tối đa: ${maxAge}\n- Chi phí ước tính: ${total}/tháng`;
+    const ok = await gbCopy(text);
+    if (ok) alert('Đã sao chép bản tóm tắt chi phí sao lưu!');
+  }
+
+  async function copyLifecycleCode() {
+    const code = document.getElementById('lifecycleCodeBlock').textContent;
+    const ok = await gbCopy(code);
+    if (ok) alert('Đã sao chép lệnh cấu hình AWS S3 Lifecycle vào bộ nhớ tạm!');
+  }
+
+  // Khởi chạy tính toán lần đầu
+  recalculateAll();
+</script>
+</body>
+</html>
